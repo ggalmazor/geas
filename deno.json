@@ -1,0 +1,44 @@
+{
+  "name": "geas",
+  "version": "0.1.0",
+  "exports": "./src/cli.ts",
+  "tasks": {
+    "start": "deno run -A src/cli.ts",
+    "dev": "deno run --allow-read --allow-write --allow-run --allow-net --watch src/cli.ts",
+    "check": "deno check **/*.ts",
+    "fmt": "deno fmt",
+    "test": "deno test --allow-read --allow-write --allow-run --allow-net"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "fmt": {
+    "files": {
+      "include": ["src/"],
+      "exclude": ["node_modules/"]
+    },
+    "options": {
+      "useTabs": false,
+      "lineWidth": 999,
+      "indentWidth": 2,
+      "singleQuote": true,
+      "proseWrap": "preserve"
+    }
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1",
+    "@zip-js/zip-js": "https://deno.land/x/zipjs@v2.7.34/index.js",
+    "@std/cli": "jsr:@std/cli@^1.0.0",
+    "@std/fs": "jsr:@std/fs@^1.0.0",
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "deno-dom": "jsr:@b-fuze/deno-dom"
+  },
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true
+  }
+}
