@@ -112,12 +112,13 @@ export class EpubParser {
   ): Promise<Chapter[]> {
     const chapters: Chapter[] = [];
 
-    for (const href of manifest.spineOrder) {
+    for (let index = 0; index < manifest.spineOrder.length; index++) {
+      const href = manifest.spineOrder[index];
       const fullPath = manifest.baseDir + href;
 
       try {
         const xhtmlContent = await this.extractFile(entries, fullPath);
-        const chapter = this.parseChapter(xhtmlContent);
+        const chapter = this.parseChapter(xhtmlContent, index);
 
         if (chapter.content.trim()) {
           chapters.push(chapter);
@@ -130,7 +131,7 @@ export class EpubParser {
     return chapters;
   }
 
-  private parseChapter(xhtmlContent: string): Chapter {
+  private parseChapter(xhtmlContent: string, chapterIndex: number): Chapter {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xhtmlContent, 'text/html');
     const headers = [...doc.querySelectorAll('h1, h2, h3, h4, h5, h6')].map(
@@ -141,8 +142,13 @@ export class EpubParser {
         };
       },
     ).toSorted((a, b) => a.level - b.level);
-    const title = headers[0]?.text;
-    const content = this.parseContent(doc);
+
+    const title = headers[0]?.text || `Chapter ${chapterIndex + 1}`;
+    const mainContent = this.parseContent(doc);
+
+    // Prepend the title as the first line of content
+    const content = `${title}\n\n${mainContent}`;
+
     return {
       title,
       content,

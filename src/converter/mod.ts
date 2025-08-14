@@ -1,4 +1,8 @@
 import type { Logger } from '../logger/mod.ts';
+import type { AudioFile } from '../tts/mod.ts';
+import type { TextChunk } from '../processor/mod.ts';
+import { FFmpeg } from '../ffmpeg/ffmpeg.ts';
+import { ensureDir } from '@std/fs';
 
 export interface ConversionOptions {
   inputFile: string;
@@ -16,6 +20,11 @@ export interface BookMetadata {
 export interface Chapter {
   title: string | undefined;
   content: string;
+  index?: number;
+  textChunks?: TextChunk[];
+  audioFiles?: AudioFile[];
+  duration?: number;
+  wordCount?: number;
 }
 
 export async function convertEbookToAudio(
@@ -27,6 +36,11 @@ export async function convertEbookToAudio(
   options.logger.info('Starting EPUB parsing');
   console.log('📖 Parsing ebook...');
   const book = await parseEbook(options.inputFile);
+
+  // Add index to chapters
+  book.chapters.forEach((chapter, index) => {
+    chapter.index = index;
+  });
 
   options.logger.info('EPUB parsed successfully', {
     title: book.title,
@@ -46,10 +60,18 @@ export async function convertEbookToAudio(
 
   console.log();
 
+  // Process text chunks and associate them with chapters
   const processor = new TextProcessor();
   console.log(`\n📝 Creating text chunks...`);
-  const chunks = processor.createTextChunks(book.chapters);
-  console.log(`Created ${chunks.length} text chunks`);
+  processor.populateChapterTextChunks(book.chapters);
+
+  const totalChunks = book.chapters.reduce((sum, ch) => sum + (ch.textChunks?.length || 0), 0);
+  console.log(`Created ${totalChunks} text chunks`);
+
+  // Calculate metadata for each chapter
+  book.chapters.forEach((chapter) => {
+    chapter.wordCount = processor.countWords(chapter.content);
+  });
 
   const totalMinutes = processor.estimateReadingTime(
     book.chapters.map((ch) => ch.content).join(' '),
@@ -65,21 +87,37 @@ export async function convertEbookToAudio(
   options.logger.info('Starting TTS generation with Piper');
   const tts = new PiperTTS(options.logger);
   const tempDir = `./temp_${Date.now()}`;
+  await ensureDir(tempDir);
 
-  const audioFiles = await tts.generateAudio(chunks, {
-    voice: options.voice,
-    outputDir: tempDir,
+  const ffmpeg = new FFmpeg(options.logger);
+  const longSilence = await ffmpeg.generateSilenceFile(1.5, tempDir);
+  const shortSilence = await ffmpeg.generateSilenceFile(0.8, tempDir);
+
+  // Generate audio and associate with chapters
+  await tts.generateChapterAudio(
+    book.chapters,
+    {
+      voice: options.voice,
+      outputDir: tempDir,
+    },
+    longSilence,
+    shortSilence,
+  );
+
+  // Calculate total duration for each chapter
+  book.chapters.forEach((chapter) => {
+    chapter.duration = chapter.audioFiles?.reduce((sum, file) => sum + file.duration, 0) || 0;
   });
 
+  const totalAudioFiles = book.chapters.reduce((sum, ch) => sum + (ch.audioFiles?.length || 0), 0);
   options.logger.info('TTS generation completed', {
-    audioFileCount: audioFiles.length,
+    audioFileCount: totalAudioFiles,
   });
 
   console.log();
   options.logger.info('Starting audiobook assembly');
   const assembler = new AudiobookAssembler(options.logger);
   await assembler.assembleAudiobook(
-    audioFiles,
     book,
     options.outputFile,
   );
@@ -88,7 +126,7 @@ export async function convertEbookToAudio(
 
   console.log('🧹 Cleaning up temporary files...');
 
-  await assembler.cleanupAudioFiles(audioFiles);
+  await assembler.cleanupChapterAudioFiles(book.chapters);
 
   try {
     await Deno.remove(tempDir, { recursive: true });

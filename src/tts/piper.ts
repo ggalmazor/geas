@@ -1,6 +1,7 @@
 import { join } from '@std/path';
 import { ensureDir } from '@std/fs';
 import type { TextChunk } from '../processor/mod.ts';
+import type { Chapter } from '../converter/mod.ts';
 import type { Logger } from '../logger/mod.ts';
 import { CommandExecutor } from '../utils/mod.ts';
 
@@ -15,8 +16,8 @@ export interface TTSOptions {
 export interface AudioFile {
   filePath: string;
   duration: number;
-  chunkIndex: number;
-  chapterIndex: number;
+  chunkIndex?: number;
+  chapterIndex?: number;
 }
 
 export class PiperTTS {
@@ -26,34 +27,56 @@ export class PiperTTS {
     this.commandExecutor = new CommandExecutor(logger);
   }
 
-  async generateAudio(
-    chunks: TextChunk[],
+  async generateChapterAudio(
+    chapters: Chapter[],
     options: TTSOptions,
-  ): Promise<AudioFile[]> {
+    shortSilence: AudioFile,
+    longSilence: AudioFile,
+  ): Promise<void> {
     await ensureDir(options.outputDir);
 
-    const audioFiles: AudioFile[] = [];
     console.log(`🎙️  Generating audio with Piper (${options.voice})...`);
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      if (!chunk) continue;
+    let globalChunkIndex = 0;
 
-      const progress = `${i + 1}/${chunks.length}`;
+    for (const chapter of chapters) {
+      if (!chapter.textChunks) continue;
 
-      console.log(
-        `  [${progress}] Chapter ${chunk.chapterIndex + 1}, Chunk ${chunk.chunkIndex + 1}`,
-      );
+      console.log(`  Chapter ${(chapter.index || 0) + 1}: ${chapter.title || 'Untitled'}`);
 
-      try {
-        const audioFile = await this.generateChunkAudio(chunk, i, options);
-        audioFiles.push(audioFile);
-      } catch (error) {
-        throw new Error(`Failed to generate audio for chunk ${i}: ${error}`);
+      const chapterAudioFiles: AudioFile[] = [];
+
+      for (let i = 0; i < chapter.textChunks.length; i++) {
+        const chunk = chapter.textChunks[i];
+        if (!chunk) continue;
+
+        console.log(
+          `    [${globalChunkIndex + 1}] Chunk ${chunk.chunkIndex + 1}${i === 0 ? ' (Title)' : ''}`,
+        );
+
+        try {
+          const audioFile = await this.generateChunkAudio(chunk, globalChunkIndex, options);
+          chapterAudioFiles.push(audioFile);
+
+          globalChunkIndex++;
+
+          const silence = i === 0 || i === chapter.textChunks.length - 1 ? longSilence : shortSilence;
+          const silenceFile: AudioFile = {
+            filePath: silence.filePath,
+            duration: silence.duration,
+            chunkIndex: chunk.chunkIndex + 0.5,
+            chapterIndex: chunk.chapterIndex,
+          };
+          chapterAudioFiles.push(silenceFile);
+
+          globalChunkIndex++;
+        } catch (error) {
+          throw new Error(`Failed to generate audio for chapter ${chapter.index}, chunk ${chunk.chunkIndex}: ${error}`);
+        }
       }
-    }
 
-    return audioFiles;
+      chapter.audioFiles = chapterAudioFiles;
+    }
   }
 
   private async generateChunkAudio(

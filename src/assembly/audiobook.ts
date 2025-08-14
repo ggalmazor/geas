@@ -3,7 +3,7 @@ import { ensureDir } from '@std/fs';
 import type { AudioFile } from '../tts/mod.ts';
 import type { Logger } from '../logger/mod.ts';
 import { CommandExecutor } from '../utils/mod.ts';
-import type { BookMetadata } from '../converter/mod.ts';
+import type { BookMetadata, Chapter } from '../converter/mod.ts';
 
 export interface ChapterMarker {
   title: string;
@@ -17,7 +17,22 @@ export class AudiobookAssembler {
     this.commandExecutor = new CommandExecutor(logger);
   }
 
-  async assembleAudiobook(
+  assembleAudiobook(
+    metadata: BookMetadata,
+    outputPath: string,
+  ): Promise<void> {
+    // Extract all audio files from chapters
+    const audioFiles: AudioFile[] = [];
+    metadata.chapters.forEach((chapter) => {
+      if (chapter.audioFiles) {
+        audioFiles.push(...chapter.audioFiles);
+      }
+    });
+
+    return this.assembleAudiobookFromFiles(audioFiles, metadata, outputPath);
+  }
+
+  async assembleAudiobookFromFiles(
     audioFiles: AudioFile[],
     metadata: BookMetadata,
     outputPath: string,
@@ -26,18 +41,11 @@ export class AudiobookAssembler {
 
     await ensureDir(dirname(outputPath));
 
-    const sortedFiles = audioFiles.sort((a, b) => a.chapterIndex - b.chapterIndex || a.chunkIndex - b.chunkIndex);
+    const sortedFiles = audioFiles.sort((a, b) => a.chapterIndex! - b.chapterIndex! || a.chunkIndex! - b.chunkIndex!);
 
     // Determine audio stream parameters from the first chunk
     const firstFile = sortedFiles[0];
     const { sampleRate, channels } = firstFile ? await this.getAudioStreamInfo(firstFile.filePath) : { sampleRate: 24000, channels: 1 };
-
-    // Pre-generate silence files
-    const outDir = dirname(outputPath);
-    const silence08Path = join(outDir, 'silence_0p8.wav');
-    const silence15Path = join(outDir, 'silence_1p5.wav');
-    await this.generateSilenceFile(0.8, silence08Path, sampleRate, channels);
-    await this.generateSilenceFile(1.5, silence15Path, sampleRate, channels);
 
     const chapterMarkers = this.calculateChapterMarkers(sortedFiles, metadata);
 
@@ -45,8 +53,6 @@ export class AudiobookAssembler {
     await this.createConcatFile(
       sortedFiles,
       tempConcatFile,
-      silence08Path,
-      silence15Path,
     );
 
     try {
@@ -61,8 +67,6 @@ export class AudiobookAssembler {
     } finally {
       try {
         await Deno.remove(tempConcatFile);
-        await Deno.remove(silence08Path);
-        await Deno.remove(silence15Path);
       } catch {
         // Ignore cleanup errors
       }
@@ -83,15 +87,15 @@ export class AudiobookAssembler {
       if (!file) continue;
 
       if (file.chapterIndex !== currentChapter) {
-        const chapterTitle = metadata.chapters[file.chapterIndex]?.title ||
-          `Chapter ${file.chapterIndex + 1}`;
+        const chapterTitle = metadata.chapters[file.chapterIndex!]?.title ||
+          `Chapter ${file.chapterIndex! + 1}`;
 
         markers.push({
           title: chapterTitle,
           startTime: currentTime,
         });
 
-        currentChapter = file.chapterIndex;
+        currentChapter = file.chapterIndex!;
       }
 
       // Add current audio duration
@@ -115,31 +119,14 @@ export class AudiobookAssembler {
   private async createConcatFile(
     audioFiles: AudioFile[],
     concatFilePath: string,
-    silence08Path: string,
-    silence15Path: string,
   ): Promise<void> {
     const lines: string[] = [];
 
     for (let i = 0; i < audioFiles.length; i++) {
       const file = audioFiles[i];
-      const next = audioFiles[i + 1];
       if (!file) continue;
-      const isLast = i === audioFiles.length - 1;
-      const isEndOfChapter = !next ||
-        (next && next.chapterIndex !== file.chapterIndex);
 
-      // Current chunk file
       lines.push(`file '${file.filePath}'`);
-
-      // Add 1.5s silence at end of chapter (even at end of book)
-      if (isEndOfChapter) {
-        lines.push(`file '${silence15Path}'`);
-      }
-
-      // Add 0.8s silence between each chunk (not after the last chunk)
-      if (!isLast) {
-        lines.push(`file '${silence08Path}'`);
-      }
     }
 
     await Deno.writeTextFile(concatFilePath, lines.join('\n'));
@@ -172,41 +159,6 @@ export class AudiobookAssembler {
 
     if (!result.success) {
       throw new Error(`ffmpeg concat failed: ${result.stderr}`);
-    }
-  }
-
-  private async generateSilenceFile(
-    durationSeconds: number,
-    outputPath: string,
-    sampleRate?: number,
-    channels?: number,
-  ): Promise<void> {
-    const r = sampleRate ?? 24000;
-    const ch = channels ?? 1;
-    const channelLayout = ch === 1 ? 'mono' : ch === 2 ? 'stereo' : `${ch}c`;
-
-    const args = [
-      '-f',
-      'lavfi',
-      '-i',
-      `anullsrc=r=${r}:cl=${channelLayout}`,
-      '-t',
-      String(durationSeconds),
-      '-ar',
-      String(r),
-      '-ac',
-      String(ch),
-      '-c:a',
-      'pcm_s16le',
-      '-y',
-      outputPath,
-    ];
-
-    const result = await this.commandExecutor.execute('ffmpeg', args);
-    if (!result.success) {
-      throw new Error(
-        `Failed to generate silence (${durationSeconds}s): ${result.stderr}`,
-      );
     }
   }
 
@@ -269,8 +221,6 @@ export class AudiobookAssembler {
         `artist=${metadata.author}`,
         '-metadata',
         `album=${metadata.title}`,
-        // "-metadata",
-        // `genre=${metadata.genre || "Audiobook"}`,
         '-metadata',
         `comment=Generated with geas`,
         '-y',
@@ -323,14 +273,18 @@ export class AudiobookAssembler {
     await Deno.writeTextFile(filePath, ffmetadataContent.join('\n'));
   }
 
-  async cleanupAudioFiles(audioFiles: AudioFile[]): Promise<void> {
+  async cleanupChapterAudioFiles(chapters: Chapter[]): Promise<void> {
     console.log('🧹 Cleaning up temporary files...');
 
-    for (const file of audioFiles) {
-      try {
-        await Deno.remove(file.filePath);
-      } catch {
-        // Ignore cleanup errors
+    for (const chapter of chapters) {
+      if (chapter.audioFiles) {
+        for (const file of chapter.audioFiles) {
+          try {
+            await Deno.remove(file.filePath);
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
       }
     }
   }

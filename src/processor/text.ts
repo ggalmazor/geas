@@ -9,29 +9,26 @@ export interface TextChunk {
 }
 
 export class TextProcessor {
-  createTextChunks(
-    chapters: Array<Chapter>,
-  ): TextChunk[] {
-    const chunks: TextChunk[] = [];
+  populateChapterTextChunks(chapters: Array<Chapter>): void {
     let globalOffset = 0;
 
     for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex++) {
       const chapter = chapters[chapterIndex];
       if (!chapter) continue;
 
+      const chapterChunks: TextChunk[] = [];
       const paragraphs = chapter.content.split('\n');
 
       let chunkIndex = 0;
 
       for (const paragraph of paragraphs) {
-        // Process each paragraph as a separate chunk to maintain fidelity
         // Skip empty paragraphs
         if (paragraph.trim().length === 0) {
           globalOffset += paragraph.length;
           continue;
         }
 
-        chunks.push({
+        chapterChunks.push({
           text: paragraph.trim(),
           chapterIndex,
           chunkIndex,
@@ -42,14 +39,18 @@ export class TextProcessor {
         globalOffset += paragraph.length;
         chunkIndex++;
       }
-    }
 
-    return chunks;
+      chapter.textChunks = chapterChunks;
+    }
+  }
+
+  countWords(text: string): number {
+    return text.split(/\s+/).filter((word) => word.length > 0).length;
   }
 
   estimateReadingTime(text: string): number {
     const wordsPerMinute = 200;
-    const words = text.split(/\s+/).length;
+    const words = this.countWords(text);
     return Math.ceil(words / wordsPerMinute);
   }
 }

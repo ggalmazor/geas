@@ -11,21 +11,23 @@
   },
   "lint": {
     "rules": {
-      "tags": ["recommended"]
+      "tags": [
+        "recommended"
+      ]
     }
   },
   "fmt": {
-    "files": {
-      "include": ["src/"],
-      "exclude": ["node_modules/"]
-    },
-    "options": {
-      "useTabs": false,
-      "lineWidth": 999,
-      "indentWidth": 2,
-      "singleQuote": true,
-      "proseWrap": "preserve"
-    }
+    "include": [
+      "src/"
+    ],
+    "exclude": [
+      "node_modules/"
+    ],
+    "useTabs": false,
+    "lineWidth": 999,
+    "indentWidth": 2,
+    "singleQuote": true,
+    "proseWrap": "preserve"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1",
