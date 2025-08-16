@@ -92,37 +92,39 @@ export class AudiobookAssembler {
   ): ChapterMarker[] {
     const markers: ChapterMarker[] = [];
     let currentTime = 0;
-    let currentChapter = -1;
 
-    for (let i = 0; i < audioFiles.length; i++) {
-      const file = audioFiles[i];
-      const next = audioFiles[i + 1];
-      if (!file) continue;
-
-      if (file.chapterIndex !== currentChapter) {
-        const chapterTitle = metadata.chapters[file.chapterIndex!]?.title ||
-          `Chapter ${file.chapterIndex! + 1}`;
-
-        markers.push({
-          title: chapterTitle,
-          startTime: currentTime,
-        });
-
-        currentChapter = file.chapterIndex!;
+    // Group audio files by chapter (after merging, each chapter should have one file)
+    const chapterFiles = new Map<number, AudioFile>();
+    for (const file of audioFiles) {
+      if (file.chapterIndex !== undefined) {
+        chapterFiles.set(file.chapterIndex, file);
       }
+    }
 
-      // Add current audio duration
-      currentTime += file.duration;
+    // Create markers using accurate chapter durations
+    for (let chapterIndex = 0; chapterIndex < metadata.chapters.length; chapterIndex++) {
+      const chapter = metadata.chapters[chapterIndex];
+      const audioFile = chapterFiles.get(chapterIndex);
 
-      // Add 1.5s silence at the end of each chapter (even at end of book)
-      const isEndOfChapter = !next || next.chapterIndex !== file.chapterIndex;
-      if (isEndOfChapter) {
-        currentTime += 1.5;
-      }
+      if (!chapter) continue;
 
-      // Add 0.8s silence between each chunk except after the last chunk
-      if (next) {
-        currentTime += 0.8;
+      const chapterTitle = chapter.title || `Chapter ${chapterIndex + 1}`;
+
+      markers.push({
+        title: chapterTitle,
+        startTime: currentTime,
+      });
+
+      // Use the most accurate duration available:
+      // 1. Chapter.duration (from merged file with ffprobe measurement)
+      // 2. Audio file duration (from individual file)
+      // 3. Skip if no duration available
+      if (chapter.duration !== undefined) {
+        currentTime += chapter.duration;
+      } else if (audioFile) {
+        currentTime += audioFile.duration;
+      } else {
+        console.warn(`No duration available for chapter ${chapterIndex + 1}: ${chapterTitle}`);
       }
     }
 
