@@ -35,7 +35,8 @@
     "@std/cli": "jsr:@std/cli@^1.0.0",
     "@std/fs": "jsr:@std/fs@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.0",
-    "deno-dom": "jsr:@b-fuze/deno-dom"
+    "deno-dom": "jsr:@b-fuze/deno-dom",
+    "p-queue": "npm:p-queue@^8.1.0"
   },
   "nodeModulesDir": "auto",
   "compilerOptions": {

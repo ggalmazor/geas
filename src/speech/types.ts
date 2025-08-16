@@ -9,16 +9,20 @@ export type ChapterNarration = Chapter & {
   audioFile: string;
 };
 
-export interface PiperSpeechOptions {
-  voice: string;
-  sentenceSilence: number;
+interface CommonSpeechOptions {
+  concurrency: number;
 }
 
+export type PiperSpeechOptions = CommonSpeechOptions & {
+  voice: string;
+  sentenceSilence: number;
+};
+
 // This is just a stub to show how the SpeechOptions is actually a sum type of specific TTS engine options;
-export interface BarkSpeechOptions {
+export type BarkSpeechOptions = CommonSpeechOptions & {
   voice: string;
   outputDir: string;
-}
+};
 
 export type SpeechOptions = PiperSpeechOptions | BarkSpeechOptions;
 

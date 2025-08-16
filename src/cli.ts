@@ -13,6 +13,7 @@ interface Args {
   input?: string;
   output?: string;
   voice?: string;
+  concurrency?: number;
   help?: boolean;
   _: string[];
 }
@@ -26,11 +27,12 @@ USAGE:
 OPTIONS:
     -o, --output <path>           Output audiobook file (default: input basename + .m4a)
     -v, --voice <name>            Piper voice model name (default: en_US-ljspeech-high)
+    -c, --concurrency <num>       Number of concurrent TTS tasks (default: 6)
     -h, --help                    Show this help
 
 EXAMPLES:
     geas book.epub --sample
-    geas book.epub -o audiobook.m4a -v en_US-ljspeech-high
+    geas book.epub -o audiobook.m4a -v en_US-ljspeech-high -c 4
 `;
 
 function showHelp(): void {
@@ -51,12 +53,14 @@ async function main(): Promise<void> {
     alias: {
       o: 'output',
       v: 'voice',
+      c: 'concurrency',
       h: 'help',
     },
     boolean: ['help'],
     string: ['output', 'voice'],
     default: {
       voice: 'en_US-ljspeech-high',
+      concurrency: 6,
     },
   }) as Args;
 
@@ -72,17 +76,20 @@ async function main(): Promise<void> {
   const outputFile = args.output || `${basename(inputFile, '.epub')}.m4a`;
 
   const voice = args.voice!;
+  const concurrency = args.concurrency!;
 
   try {
     logger.info('Starting geas conversion', {
       inputFile,
       outputFile,
       voice,
+      concurrency,
     });
 
     console.log(`Converting "${inputFile}" to audiobook...`);
     console.log(`Output: ${outputFile}`);
     console.log(`Voice: ${voice}`);
+    console.log(`Concurrency: ${concurrency}`);
     console.log();
 
     // Create temporary directory for processing
@@ -102,7 +109,8 @@ async function main(): Promise<void> {
       }));
 
       console.log('🎙️ Generating speech...');
-      const speechOptions: PiperSpeechOptions = {
+      const speechOptions = {
+        concurrency,
         voice,
         sentenceSilence: 0.8,
       };

@@ -1,14 +1,16 @@
 import { Book, Chapter } from '../ebook/types.ts';
-import { BookNarration, ChapterNarration, PiperSpeechOptions, SpeechOptions } from './types.ts';
+import { BookNarration, ChapterNarration, SpeechOptions } from './types.ts';
 import { generateSilenceFile, getAudioDuration } from './ffmpeg.ts';
 import { join } from '@std/path';
 import { mergeAudioFiles } from '../utils/ffmpeg.ts';
 import { buildTTS } from './tts.ts';
+import PQueue from 'npm:p-queue';
 
 export async function read(book: Book, tempDir: string, options: SpeechOptions): Promise<BookNarration> {
   const tts = buildTTS(options);
+  const queue = new PQueue({ concurrency: options.concurrency });
 
-  console.log(`🎙️  Generating audio with TTS...`);
+  console.log(`🎙️  Generating audio with TTS... (concurrency: ${(options.concurrency)})`);
 
   const longSilence = await generateSilenceFile(1.5, tempDir);
   const shortSilence = await generateSilenceFile(0.8, tempDir);
@@ -17,7 +19,9 @@ export async function read(book: Book, tempDir: string, options: SpeechOptions):
     const audioFiles: string[] = await Promise.all(chapter.lines.map(async (paragraph: string, index: number): Promise<string> => {
       const outputFile = join(tempDir, `chapter_${chapter.number}_paragraph_${index + 1}.wav`);
 
-      await tts.read(cleanText(paragraph), outputFile, options);
+      await queue.add(async () => {
+        await tts.read(cleanText(paragraph), outputFile, options);
+      });
 
       return outputFile;
     }));
