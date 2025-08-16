@@ -22,7 +22,34 @@ You need the following installed and available on PATH:
 - Piper CLI (https://github.com/rhasspy/piper)
 - A Piper voice model (.onnx) and its config (.onnx.json)
 
-Notes about Piper voice argument (-v/--voice):
+### Easy setup with ASDF
+
+This project includes a `.tool-versions` file for [ASDF](https://asdf-vm.com/) users to manage dependencies:
+
+```bash
+# Install ASDF plugins if not already installed
+asdf plugin add deno
+asdf plugin add python
+
+# Install the specified versions from .tool-versions
+asdf install
+
+# Install Piper TTS via pip (requires Python)
+pip install piper-tts
+
+# Verify installations
+deno --version
+python --version
+piper --help
+```
+
+The `.tool-versions` file specifies:
+- Deno 2.4.3
+- Python 3.11.13
+
+**Note**: You'll still need to install FFmpeg separately through your system's package manager (brew, apt, etc.) as it's not managed by ASDF.
+
+### Notes about Piper voice argument (-v/--voice):
 
 - You can pass either a model identifier recognized by your Piper installation, or a path to a local .onnx file.
 - When passing a local .onnx, Piper looks for a matching .onnx.json config next to it (same basename). The included models already follow this naming.
