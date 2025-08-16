@@ -16,24 +16,31 @@ export async function read(book: Book, tempDir: string, options: SpeechOptions):
   const shortSilence = await generateSilenceFile(0.8, tempDir);
 
   const chuchu: Promise<ChapterNarration>[] = book.chapters.map(async (chapter: Chapter): Promise<ChapterNarration> => {
+    console.log(`  📝 Processing chapter ${chapter.number}: "${chapter.title}"`);
+    
     const audioFiles: string[] = await Promise.all(chapter.lines.map(async (paragraph: string, index: number): Promise<string> => {
       const outputFile = join(tempDir, `chapter_${chapter.number}_paragraph_${index + 1}.wav`);
 
       await queue.add(async () => {
         await tts.read(cleanText(paragraph), outputFile, options);
+        process.stdout.write('.');
       });
 
       return outputFile;
     }));
+    
+    console.log(` ✓ Generated ${audioFiles.length} audio segments`);
 
     const audioFilesWithSilences = audioFiles.flatMap((audioFile, index, array) => {
       return [audioFile, index === 0 || index === array.length - 1 ? longSilence : shortSilence];
     });
 
     const audioFile = join(tempDir, `chapter_${chapter.number}.wav`);
+    console.log(`  🔗 Merging chapter ${chapter.number} audio files...`);
     await mergeAudioFiles(audioFilesWithSilences, audioFile);
 
     const duration = await getAudioDuration(audioFile);
+    console.log(`  ✓ Chapter ${chapter.number} complete (${duration.toFixed(1)}s)`);
 
     return { ...chapter, duration, audioFile };
   });
