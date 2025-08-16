@@ -7,7 +7,7 @@ import * as ebook from './ebook/mod.ts';
 import * as speech from './speech/mod.ts';
 import * as audiobook from './audiobook/mod.ts';
 import { Logger } from './logger/mod.ts';
-import { ProgressMatrix } from './utils/progress.ts';
+import { ConsoleProgressListener, MatrixProgressListener, progressEmitter } from './events/mod.ts';
 
 interface Args {
   input?: string;
@@ -106,43 +106,50 @@ async function main(): Promise<void> {
     await ensureDir(tempDir);
 
     try {
-      console.log('📖 Parsing ebook...');
-      const book = await ebook.parse(inputFile);
-      console.log(`Title: ${book.title}`);
-      console.log(`Author: ${book.author}`);
-      console.log(`Chapters: ${book.chapters.length}`);
-      console.log();
+      // Set up event listeners
+      const consoleListener = new ConsoleProgressListener(useMatrix);
+      const matrixListener = useMatrix ? new MatrixProgressListener() : null;
 
-      // Initialize progress matrix if enabled
-      const progress = useMatrix ? new ProgressMatrix(book.chapters) : undefined;
+      // Subscribe listeners
+      const unsubscribeConsole = progressEmitter.subscribe((event) => consoleListener.listen(event));
+      const unsubscribeMatrix = matrixListener ? progressEmitter.subscribe((event) => matrixListener.listen(event)) : null;
 
-      // Parse with progress tracking
-      await ebook.parse(inputFile, progress);
+      try {
+        const book = await ebook.parse(inputFile);
 
-      await Promise.all(book.chapters.map((chapter) => {
-        return Deno.writeTextFile(join(tempDir, `chapter_${chapter.number}.txt`), chapter.lines.join('\n'));
-      }));
+        await Promise.all(book.chapters.map((chapter) => {
+          return Deno.writeTextFile(join(tempDir, `chapter_${chapter.number}.txt`), chapter.lines.join('\n'));
+        }));
 
-      if (!useMatrix) {
-        console.log('🎙️ Generating speech...');
+        const speechOptions = {
+          concurrency,
+          voice,
+          sentenceSilence: 0.8,
+        };
+
+        const bookNarration = await speech.read(book, tempDir, speechOptions);
+        await audiobook.assemble(bookNarration, tempDir, outputFile);
+
+        // Calculate final stats
+        const totalLines = book.chapters.reduce((sum, chapter) => sum + chapter.lines.length, 0);
+        const totalDuration = bookNarration.chapterNarrations.reduce((sum, chapter) => sum + chapter.duration, 0);
+
+        progressEmitter.emit({
+          type: 'processing:complete',
+          outputPath: outputFile,
+          stats: {
+            totalLines,
+            totalChapters: book.chapters.length,
+            totalDuration,
+          },
+        });
+
+        logger.info('Conversion completed successfully', { outputFile });
+      } finally {
+        // Clean up event listeners
+        unsubscribeConsole();
+        if (unsubscribeMatrix) unsubscribeMatrix();
       }
-
-      const speechOptions = {
-        concurrency,
-        voice,
-        sentenceSilence: 0.8,
-      };
-
-      const bookNarration = await speech.read(book, tempDir, speechOptions, progress);
-
-      if (!useMatrix) {
-        console.log('📀 Assembling audiobook...');
-      }
-
-      await audiobook.assemble(bookNarration, tempDir, outputFile, progress);
-
-      logger.info('Conversion completed successfully', { outputFile });
-      console.log(`✓ Audiobook created: ${outputFile}`);
     } finally {
       // Clean up temporary directory
     }

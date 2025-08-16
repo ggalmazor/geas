@@ -37,7 +37,7 @@ export class ProgressMatrix {
         }
       }
     }
-    
+
     this.updateDisplay();
     this.render();
   }
@@ -139,13 +139,13 @@ export class ProgressMatrix {
   private getStats() {
     const total = this.lines.length;
     const parsed = this.lines.filter((l) => l.state !== LineState.PENDING).length;
-    const tts = this.lines.filter((l) => 
-      l.state === LineState.TTS_GENERATED || 
-      l.state === LineState.CHAPTER_MERGED || 
+    const tts = this.lines.filter((l) =>
+      l.state === LineState.TTS_GENERATED ||
+      l.state === LineState.CHAPTER_MERGED ||
       l.state === LineState.AUDIOBOOK_MERGED
     ).length;
-    const chapter = this.lines.filter((l) => 
-      l.state === LineState.CHAPTER_MERGED || 
+    const chapter = this.lines.filter((l) =>
+      l.state === LineState.CHAPTER_MERGED ||
       l.state === LineState.AUDIOBOOK_MERGED
     ).length;
     const complete = this.lines.filter((l) => l.state === LineState.AUDIOBOOK_MERGED).length;
