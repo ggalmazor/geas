@@ -2,16 +2,16 @@
 
 Convert EPUB ebooks into chapterized audiobooks (M4A) using Piper TTS and FFmpeg. Built with Deno.
 
-Geas parses an EPUB, splits its content into natural chunks, generates speech via Piper, then assembles a single .m4a file with chapter markers and embedded metadata (title/author/album).
+Geas parses an EPUB, splits its content into natural chunks, generates speech via Piper with parallel processing, then assembles a single .m4a file with chapter markers and embedded metadata.
 
 ## Features
 
-- EPUB parsing (OPF + spine order) and robust XHTML text extraction
-- Text processing into paragraph-sized chunks
-- TTS generation using Piper
-- Smart silences between chunks (0.8s) and at chapter ends (1.5s)
-- Chapterized M4A output with metadata (title, author, album) via FFmpeg
-- Simple CLI with logging to ./logs
+- **EPUB Parsing**: Robust XHTML text extraction with DOM-based parsing
+- **Parallel TTS Generation**: Configurable concurrency for faster processing
+- **Chapterized M4A output**
+- **Progress visualization modes**: 
+  - Enhanced console output with detailed progress tracking
+  - Matrix visualization showing real-time processing state
 
 ## Requirements
 
@@ -43,12 +43,20 @@ You can run directly with Deno (no compile step required):
 
 **Basic**
 
+```
 deno run start <input.epub>
+```
 
 **Choose output and voice**
 
 ```
 deno run start book.epub -o audiobook.m4a -v ./en_US-ljspeech-high.onnx
+```
+
+**Parallel processing with matrix visualization**
+
+```
+deno run start book.epub --matrix -c 8
 ```
 
 **Help**
@@ -59,32 +67,73 @@ deno run src/cli.ts --help
 
 - `-o, --output <path>` Output audiobook file (default: `<input_basename>.m4a`)
 - `-v, --voice <name>` Piper voice model (ID or path). Default: `en_US-ljspeech-high`
+- `-c, --concurrency <num>` Number of concurrent TTS tasks (default: 6)
+- `-m, --matrix` Show visual progress matrix (default: false)
 - `-h, --help` Show help
+
+## Progress Visualization
+
+Geas offers two distinct progress modes to track your audiobook conversion:
+
+### Enhanced Console Mode (Default)
+```
+📖 Parsing ebook: book.epub
+Title: The Algebraist
+Author: Iain M. Banks
+Chapters: 9
+Total lines: 79
+
+🎙️ Generating speech with TTS (concurrency: 6)...
+  📝 Processing chapter 1...
+    Progress: 10/79 lines (13%)
+  ✓ Chapter 1 complete (45.2s)
+
+📀 Assembling audiobook from 9 chapters...
+  ✓ Final audiobook assembled
+
+✨ Audiobook created: book.m4a
+📊 Final stats:
+  📚 9 chapters processed
+  📝 79 text segments converted
+  🎵 2h 15m 30s total duration
+```
+
+### Matrix Visualization Mode (`--matrix`)
+```
+📊 Processing Progress Matrix
+⬜ Pending  🟦 Parsed  🟨 TTS Generated  🟩 Chapter Merged  🟪 Final Audiobook
+────────────────────────────────────────────────────────────────────────────────
+🟩🟩🟩🟩🟨🟨🟦🟦🟦⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜
+🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜
+────────────────────────────────────────────────────────────────────────────────
+Total: 79 | Parsed: 35 | TTS: 15 | Chapter: 4 | Complete: 0
+```
+
+Each dot represents a text segment flowing through the processing pipeline in real-time.
 
 ## What it does under the hood
 
-1. Parse EPUB
+### 1. Parse EPUB
+- Locates container.xml → OPF → manifest + spine order  
+- Extracts chapters using DOM-based XHTML parsing
+- Emits parsing events for progress tracking
 
-- Locates container.xml → OPF → manifest + spine order
-- Extracts chapters by following spine; parses XHTML; collects text
+### 2. Generate Speech (Parallel Processing)
+- Configurable concurrency with p-queue for optimal performance
+- Calls Piper TTS for each text segment in parallel
+- Automatic silence generation (0.8s between chunks, 1.5s after the chapter's title and between chapters)
+- Real-time progress tracking per line and chapter
 
-2. Create text chunks
+### 3. Chapter Assembly
+- Merges audio files with silences using FFmpeg
+- Measures accurate chapter durations with ffprobe
+- Automatic codec selection (PCM for WAV, AAC for M4A)
 
-- Splits by paragraphs to keep natural phrasing
-- Estimates reading time for a rough duration estimate
-
-3. Generate audio with Piper
-
-- Calls `piper --model <voice> --sentence-silence 0.5 --output-file <chunk.wav>` for each chunk
-- Measures each chunk duration with `ffprobe`
-
-4. Assemble audiobook
-
-- Pre-generates 0.8s and 1.5s silence WAVs at the detected sample rate/channels
-- Creates an ffmpeg concat list with chunk WAVs + silences
-- Merges into a single temp WAV, then transcodes to M4A (AAC 128k)
-- Adds chapter markers and metadata (title/author/album)
-- Cleans up temp files
+### 4. Final Audiobook Assembly
+- Combines all chapters into single M4A file
+- Adds chapter markers with precise timestamps
+- Embeds metadata (title, author, album)
+- Event-driven progress completion
 
 **Output**
 
@@ -93,23 +142,25 @@ deno run src/cli.ts --help
 
 ## Examples
 
-- Convert ebook
+**Convert ebook with default settings**
+```bash
+deno run start ./my-book.epub
+```
 
-  ```
-  deno run start ./examples/my-book.epub -v ./en_US-ljspeech-high.onnx
-  ```
+**High-performance conversion with custom voice**
+```bash
+deno run start ./book.epub -o ./audiobooks/my-book.m4a -v ./en_US-amy-medium.onnx -c 8
+```
 
-- Use another local voice
+**Matrix visualization for large books**
+```bash
+deno run start ./large-book.epub --matrix -c 6
+```
 
-  ```
-  deno run start ./book.epub -o ./out/my-book.m4a -v ./en_US-amy-medium.onnx
-  ```
-
-- Use a Piper-installed voice identifier (if supported by your piper build)
-
-  ```
-  deno run start ./book.epub -v en_US-ljspeech-high
-  ```
+**Use a Piper-installed voice identifier**
+```bash
+deno run start ./book.epub -v en_US-ljspeech-high
+```
 
 ## Logs and troubleshooting
 
