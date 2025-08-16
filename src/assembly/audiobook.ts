@@ -2,7 +2,7 @@ import { dirname, join } from '@std/path';
 import { ensureDir } from '@std/fs';
 import type { AudioFile } from '../tts/mod.ts';
 import type { Logger } from '../logger/mod.ts';
-import { CommandExecutor } from '../utils/mod.ts';
+import { FFmpeg } from '../ffmpeg/ffmpeg.ts';
 import type { BookMetadata, Chapter } from '../converter/mod.ts';
 
 export interface ChapterMarker {
@@ -11,10 +11,10 @@ export interface ChapterMarker {
 }
 
 export class AudiobookAssembler {
-  private commandExecutor: CommandExecutor;
+  private ffmpeg: FFmpeg;
 
   constructor(logger: Logger) {
-    this.commandExecutor = new CommandExecutor(logger);
+    this.ffmpeg = new FFmpeg(logger);
   }
 
   assembleAudiobook(
@@ -45,7 +45,7 @@ export class AudiobookAssembler {
 
     // Determine audio stream parameters from the first chunk
     const firstFile = sortedFiles[0];
-    const { sampleRate, channels } = firstFile ? await this.getAudioStreamInfo(firstFile.filePath) : { sampleRate: 24000, channels: 1 };
+    const { sampleRate, channels } = firstFile ? await this.ffmpeg.getAudioStreamInfo(firstFile.filePath) : { sampleRate: 24000, channels: 1 };
 
     const chapterMarkers = this.calculateChapterMarkers(sortedFiles, metadata);
 
@@ -56,13 +56,26 @@ export class AudiobookAssembler {
     );
 
     try {
-      await this.mergeAudioFiles(
+      const tempWav = outputPath.replace('.m4a', '_temp.wav');
+      await this.ffmpeg.mergeAudioFiles(
         tempConcatFile,
-        outputPath,
+        tempWav,
         sampleRate,
         channels,
       );
-      await this.addMetadataAndChapters(outputPath, metadata, chapterMarkers);
+      const chapterFile = outputPath.replace('.m4a', '_chapters.txt');
+      await this.createChapterFile(chapterMarkers, chapterFile);
+      await this.ffmpeg.addMetadataAndChapters(tempWav, outputPath, chapterFile, {
+        title: metadata.title,
+        author: metadata.author,
+      });
+      // Clean up temp files
+      try {
+        await Deno.remove(tempWav);
+        await Deno.remove(chapterFile);
+      } catch {
+        // Ignore cleanup errors
+      }
       console.log(`✓ Audiobook assembled: ${outputPath}`);
     } finally {
       try {
@@ -130,116 +143,6 @@ export class AudiobookAssembler {
     }
 
     await Deno.writeTextFile(concatFilePath, lines.join('\n'));
-  }
-
-  private async mergeAudioFiles(
-    concatFile: string,
-    outputPath: string,
-    sampleRate: number,
-    channels: number,
-  ): Promise<void> {
-    console.log('  Merging audio files...');
-
-    const result = await this.commandExecutor.execute('ffmpeg', [
-      '-f',
-      'concat',
-      '-safe',
-      '0',
-      '-i',
-      concatFile,
-      '-ar',
-      String(sampleRate),
-      '-ac',
-      String(channels),
-      '-c:a',
-      'pcm_s16le',
-      '-y',
-      outputPath.replace('.m4a', '_temp.wav'),
-    ]);
-
-    if (!result.success) {
-      throw new Error(`ffmpeg concat failed: ${result.stderr}`);
-    }
-  }
-
-  private async getAudioStreamInfo(
-    filePath: string,
-  ): Promise<{ sampleRate: number; channels: number }> {
-    const result = await this.commandExecutor.execute('ffprobe', [
-      '-v',
-      'error',
-      '-select_streams',
-      'a:0',
-      '-show_entries',
-      'stream=sample_rate,channels',
-      '-of',
-      'csv=p=0',
-      filePath,
-    ]);
-
-    if (!result.success) {
-      return { sampleRate: 24000, channels: 1 };
-    }
-
-    const out = result.stdout.trim();
-    // Expecting "sample_rate,channels" as numbers
-    const parts = out.split(',');
-    const sampleRate = parseInt(parts[0] || '24000', 10);
-    const channels = parseInt(parts[1] || '1', 10);
-    return { sampleRate: sampleRate || 24000, channels: channels || 1 };
-  }
-
-  private async addMetadataAndChapters(
-    outputPath: string,
-    metadata: BookMetadata,
-    chapterMarkers: ChapterMarker[],
-  ): Promise<void> {
-    console.log('  Adding metadata and chapters...');
-
-    const tempWav = outputPath.replace('.m4a', '_temp.wav');
-    const chapterFile = outputPath.replace('.m4a', '_chapters.txt');
-
-    await this.createChapterFile(chapterMarkers, chapterFile);
-
-    try {
-      const ffmpegArgs = [
-        '-i',
-        tempWav,
-        '-i',
-        chapterFile,
-        '-map',
-        '0',
-        '-map_chapters',
-        '1',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        '-metadata',
-        `title=${metadata.title}`,
-        '-metadata',
-        `artist=${metadata.author}`,
-        '-metadata',
-        `album=${metadata.title}`,
-        '-metadata',
-        `comment=Generated with geas`,
-        '-y',
-        outputPath,
-      ];
-
-      const result = await this.commandExecutor.execute('ffmpeg', ffmpegArgs);
-
-      if (!result.success) {
-        throw new Error(`ffmpeg metadata failed: ${result.stderr}`);
-      }
-    } finally {
-      try {
-        await Deno.remove(tempWav);
-        await Deno.remove(chapterFile);
-      } catch {
-        // Ignore cleanup errors
-      }
-    }
   }
 
   private async createChapterFile(

@@ -1,5 +1,6 @@
 import { join } from '@std/path';
 import { ensureDir } from '@std/fs';
+import PQueue from 'https://deno.land/x/p_queue@1.0.1/mod.ts';
 import type { TextChunk } from '../processor/mod.ts';
 import type { Chapter } from '../converter/mod.ts';
 import type { Logger } from '../logger/mod.ts';
@@ -8,9 +9,7 @@ import { CommandExecutor } from '../utils/mod.ts';
 export interface TTSOptions {
   voice: string;
   outputDir: string;
-  speakingRate?: number;
-  noiseScale?: number;
-  lengthScale?: number;
+  concurrency: number;
 }
 
 export interface AudioFile {
@@ -38,41 +37,61 @@ export class PiperTTS {
     console.log(`🎙️  Generating audio with Piper (${options.voice})...`);
 
     let globalChunkIndex = 0;
-
     for (const chapter of chapters) {
       if (!chapter.textChunks) continue;
 
       console.log(`  Chapter ${(chapter.index || 0) + 1}: ${chapter.title || 'Untitled'}`);
 
       const chapterAudioFiles: AudioFile[] = [];
+      const chunks = chapter.textChunks;
 
-      for (let i = 0; i < chapter.textChunks.length; i++) {
-        const chunk = chapter.textChunks[i];
+      // Create queue with controlled concurrency
+      const queue = new PQueue({ concurrency: options.concurrency });
+
+      // Queue all chunk processing tasks
+      const results: { audioFile: AudioFile; chunkIndex: number; isFirst: boolean; isLast: boolean }[] = [];
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
         if (!chunk) continue;
 
+        const currentGlobalIndex = globalChunkIndex++;
+        const isFirst = i === 0;
+        const isLast = i === chunks.length - 1;
+
         console.log(
-          `    [${globalChunkIndex + 1}] Chunk ${chunk.chunkIndex + 1}${i === 0 ? ' (Title)' : ''}`,
+          `    [${currentGlobalIndex + 1}] Chunk ${chunk.chunkIndex + 1}${isFirst ? ' (Title)' : ''}`,
         );
 
-        try {
-          const audioFile = await this.generateChunkAudio(chunk, globalChunkIndex, options);
-          chapterAudioFiles.push(audioFile);
+        // Add task to queue
+        queue.add(async () => {
+          try {
+            const audioFile = await this.generateChunkAudio(chunk, currentGlobalIndex, options);
+            results.push({ audioFile, chunkIndex: i, isFirst, isLast });
+          } catch (error) {
+            throw new Error(`Failed to generate audio for chapter ${chapter.index}, chunk ${chunk.chunkIndex}: ${error}`);
+          }
+        });
+      }
 
-          globalChunkIndex++;
+      // Wait for all tasks to complete
+      await queue.onIdle();
 
-          const silence = i === 0 || i === chapter.textChunks.length - 1 ? longSilence : shortSilence;
-          const silenceFile: AudioFile = {
-            filePath: silence.filePath,
-            duration: silence.duration,
-            chunkIndex: chunk.chunkIndex + 0.5,
-            chapterIndex: chunk.chapterIndex,
-          };
-          chapterAudioFiles.push(silenceFile);
+      // Sort results by chunk index to maintain order
+      results.sort((a, b) => a.chunkIndex - b.chunkIndex);
 
-          globalChunkIndex++;
-        } catch (error) {
-          throw new Error(`Failed to generate audio for chapter ${chapter.index}, chunk ${chunk.chunkIndex}: ${error}`);
-        }
+      // Build audio files with silence in the correct order
+      for (const result of results) {
+        chapterAudioFiles.push(result.audioFile);
+
+        const silence = result.isFirst || result.isLast ? longSilence : shortSilence;
+        const silenceFile: AudioFile = {
+          filePath: silence.filePath,
+          duration: silence.duration,
+          chunkIndex: result.audioFile.chunkIndex! + 0.5,
+          chapterIndex: result.audioFile.chapterIndex!,
+        };
+        chapterAudioFiles.push(silenceFile);
       }
 
       chapter.audioFiles = chapterAudioFiles;
@@ -89,6 +108,8 @@ export class PiperTTS {
       `chunk_${globalIndex.toString().padStart(4, '0')}.wav`,
     );
 
+    const cleanedText = this.normalizeTextForTTS(chunk.text);
+
     const piperArgs = [
       '--model',
       options.voice,
@@ -98,20 +119,8 @@ export class PiperTTS {
       outputFile,
     ];
 
-    if (options.speakingRate) {
-      piperArgs.push('--speaking-rate', options.speakingRate.toString());
-    }
-
-    if (options.noiseScale) {
-      piperArgs.push('--noise-scale', options.noiseScale.toString());
-    }
-
-    if (options.lengthScale) {
-      piperArgs.push('--length-scale', options.lengthScale.toString());
-    }
-
     const result = await this.commandExecutor.execute('piper', piperArgs, {
-      stdin: chunk.text,
+      stdin: cleanedText,
     });
 
     if (!result.success) {
@@ -144,5 +153,26 @@ export class PiperTTS {
     }
 
     return parseFloat(result.stdout.trim()) || 0;
+  }
+
+  private normalizeTextForTTS(text: string): string {
+    return text
+      // Normalize whitespace and line endings
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      // Remove excessive whitespace
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/[ \t]+/g, ' ')
+      // Fix common punctuation issues that cause TTS problems
+      .replace(/([.!?])\s*\n\s*/g, '$1 ') // Join sentences that were split
+      .replace(/([a-z])([A-Z])/g, '$1. $2') // Add periods between sentences missing them
+      // Clean up quotes and apostrophes
+      .replace(/'/g, "'")
+      .replace(/"/g, '"')
+      // Remove or fix problematic characters
+      .replace(/[^\w\s.,!?;:()'"-]/g, '') // Remove special characters that confuse TTS
+      // Ensure proper sentence endings
+      .replace(/([a-zA-Z0-9])\s*$/, '$1.') // Add period if text doesn't end with punctuation
+      .trim();
   }
 }

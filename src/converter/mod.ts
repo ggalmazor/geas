@@ -9,6 +9,7 @@ export interface ConversionOptions {
   outputFile: string;
   voice: string;
   logger: Logger;
+  concurrency: number;
 }
 
 export interface BookMetadata {
@@ -68,17 +69,17 @@ export async function convertEbookToAudio(
   const totalChunks = book.chapters.reduce((sum, ch) => sum + (ch.textChunks?.length || 0), 0);
   console.log(`Created ${totalChunks} text chunks`);
 
+  // Create temp directory for inspection files
+  const tempDir = `./temp_${Date.now()}`;
+  await ensureDir(tempDir);
+
+  // Save chapter text files for inspection
+  await processor.saveChapterTextFiles(book.chapters, tempDir);
+
   // Calculate metadata for each chapter
   book.chapters.forEach((chapter) => {
     chapter.wordCount = processor.countWords(chapter.content);
   });
-
-  const totalMinutes = processor.estimateReadingTime(
-    book.chapters.map((ch) => ch.content).join(' '),
-  );
-  console.log(
-    `Estimated audio length: ~${totalMinutes} minutes`,
-  );
 
   const { PiperTTS } = await import('../tts/mod.ts');
   const { AudiobookAssembler } = await import('../assembly/mod.ts');
@@ -86,8 +87,6 @@ export async function convertEbookToAudio(
   console.log();
   options.logger.info('Starting TTS generation with Piper');
   const tts = new PiperTTS(options.logger);
-  const tempDir = `./temp_${Date.now()}`;
-  await ensureDir(tempDir);
 
   const ffmpeg = new FFmpeg(options.logger);
   const longSilence = await ffmpeg.generateSilenceFile(1.5, tempDir);
@@ -99,19 +98,35 @@ export async function convertEbookToAudio(
     {
       voice: options.voice,
       outputDir: tempDir,
+      concurrency: options.concurrency,
     },
     longSilence,
     shortSilence,
   );
 
-  // Calculate total duration for each chapter
-  book.chapters.forEach((chapter) => {
-    chapter.duration = chapter.audioFiles?.reduce((sum, file) => sum + file.duration, 0) || 0;
-  });
+  // Merge audio files for each chapter and measure accurate durations
+  console.log('🔗 Merging chapter audio files...');
+  for (let i = 0; i < book.chapters.length; i++) {
+    const chapter = book.chapters[i];
+    if (!chapter || !chapter.audioFiles || chapter.audioFiles.length === 0) continue;
+
+    console.log(`  Chapter ${i + 1}: ${chapter.title || 'Untitled'}`);
+
+    const mergedChapterFile = await ffmpeg.mergeChapterAudioFiles(
+      chapter.audioFiles,
+      tempDir,
+      i,
+    );
+
+    // Replace chapter's audio files with single merged file
+    chapter.audioFiles = [mergedChapterFile];
+    chapter.duration = mergedChapterFile.duration;
+  }
 
   const totalAudioFiles = book.chapters.reduce((sum, ch) => sum + (ch.audioFiles?.length || 0), 0);
-  options.logger.info('TTS generation completed', {
-    audioFileCount: totalAudioFiles,
+  options.logger.info('Chapter merging completed', {
+    chapterCount: book.chapters.length,
+    mergedAudioFiles: totalAudioFiles,
   });
 
   console.log();

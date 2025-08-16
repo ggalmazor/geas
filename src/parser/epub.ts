@@ -146,8 +146,8 @@ export class EpubParser {
     const title = headers[0]?.text || `Chapter ${chapterIndex + 1}`;
     const mainContent = this.parseContent(doc);
 
-    // Prepend the title as the first line of content
-    const content = `${title}\n\n${mainContent}`;
+    // Prepend the title as the first line of content, but avoid duplication
+    const content = this.deduplicateTitle(title, mainContent);
 
     return {
       title,
@@ -159,6 +159,31 @@ export class EpubParser {
     return [...doc.querySelector('body')!.children].flatMap((
       element: Element,
     ) => this.extractTexts(element)).filter((text) => text !== '').join('\n');
+  }
+
+  private deduplicateTitle(title: string, mainContent: string): string {
+    // Check if content starts with the title (allowing for minor variations)
+    const contentLines = mainContent.split('\n').filter((line) => line.trim());
+
+    if (contentLines.length > 0) {
+      const firstLine = contentLines[0]?.trim();
+      if (firstLine) {
+        const titleNormalized = title.toLowerCase().trim();
+        const firstLineNormalized = firstLine.toLowerCase().trim();
+
+        // If first line matches title (exact or close match), skip adding title
+        if (
+          firstLineNormalized === titleNormalized ||
+          firstLineNormalized.includes(titleNormalized) ||
+          titleNormalized.includes(firstLineNormalized)
+        ) {
+          return mainContent;
+        }
+      }
+    }
+
+    // Title doesn't duplicate, safe to prepend
+    return `${title}\n\n${mainContent}`;
   }
 
   private extractTexts(element: Element): string[] {

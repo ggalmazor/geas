@@ -67,11 +67,6 @@ export class Logger {
     this.writeToFile(this.logFile, logMessage).catch(console.error);
   }
 
-  debug(message: string, meta?: Record<string, unknown>): void {
-    const logMessage = meta ? `DEBUG: ${message} ${JSON.stringify(meta)}` : `DEBUG: ${message}`;
-    this.writeToFile(this.logFile, logMessage).catch(console.error);
-  }
-
   error(
     message: string,
     error?: Error | unknown,
