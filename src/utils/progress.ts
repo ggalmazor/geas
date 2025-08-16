@@ -11,6 +11,7 @@ export interface LineProgress {
   lineIndex: number;
   state: LineState;
   text: string;
+  wordCount: number;
 }
 
 export class ProgressMatrix {
@@ -19,9 +20,12 @@ export class ProgressMatrix {
   private maxWidth: number;
   private lastUpdate = 0;
   private updateThrottle = 200; // milliseconds
+  private startTime: number;
+  private ttsStartTime?: number;
 
   constructor(chapters: Array<{ number: number; lines: string[] }>) {
     this.maxWidth = this.getTerminalWidth();
+    this.startTime = Date.now();
 
     // Initialize all lines as pending
     for (const chapter of chapters) {
@@ -33,6 +37,7 @@ export class ProgressMatrix {
             lineIndex: i,
             state: LineState.PENDING,
             text: line.substring(0, 50) + (line.length > 50 ? '...' : ''),
+            wordCount: this.countWords(line),
           });
         }
       }
@@ -84,6 +89,10 @@ export class ProgressMatrix {
     this.render();
   }
 
+  startTtsTimer(): void {
+    this.ttsStartTime = Date.now();
+  }
+
   private throttledUpdate(): void {
     const now = Date.now();
     if (now - this.lastUpdate > this.updateThrottle) {
@@ -130,9 +139,13 @@ export class ProgressMatrix {
 
     console.log('─'.repeat(this.maxWidth));
 
-    // Show statistics
+    // Show statistics with time estimation
     const stats = this.getStats();
+    const wordStats = this.getWordStats();
+    const timeInfo = this.getTimeEstimation();
     console.log(`Total: ${stats.total} | Parsed: ${stats.parsed} | TTS: ${stats.tts} | Chapter: ${stats.chapter} | Complete: ${stats.complete}`);
+    console.log(`📝 Words: ${wordStats.processedWords.toLocaleString()}/${wordStats.totalWords.toLocaleString()} processed`);
+    console.log(`⏱️  ${timeInfo.elapsed} elapsed${timeInfo.estimate ? ` | ${timeInfo.estimate} remaining` : ''}`);
     console.log();
   }
 
@@ -153,10 +166,71 @@ export class ProgressMatrix {
     return { total, parsed, tts, chapter, complete };
   }
 
+  private getTimeEstimation(): { elapsed: string; estimate?: string } {
+    const now = Date.now();
+    const elapsed = this.formatDuration((now - this.startTime) / 1000);
+
+    // Only estimate if we have TTS progress and enough data points
+    const stats = this.getStats();
+    const wordStats = this.getWordStats();
+    if (!this.ttsStartTime || stats.tts < 3) {
+      return { elapsed };
+    }
+
+    const ttsElapsed = (now - this.ttsStartTime) / 1000;
+    const ttsRate = wordStats.processedWords / ttsElapsed; // words per second
+    const remainingWords = wordStats.totalWords - wordStats.processedWords;
+
+    if (ttsRate > 0 && remainingWords > 0) {
+      const estimatedTtsTime = remainingWords / ttsRate;
+      // Add some buffer for assembly (roughly 10% of TTS time)
+      const totalEstimated = estimatedTtsTime * 1.1;
+      return { 
+        elapsed, 
+        estimate: this.formatDuration(totalEstimated)
+      };
+    }
+
+    return { elapsed };
+  }
+
+  private countWords(text: string): number {
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+  }
+
+  private getWordStats(): { totalWords: number; processedWords: number } {
+    const totalWords = this.lines.reduce((sum, line) => sum + line.wordCount, 0);
+    const processedWords = this.lines
+      .filter(line => 
+        line.state === LineState.TTS_GENERATED ||
+        line.state === LineState.CHAPTER_MERGED ||
+        line.state === LineState.AUDIOBOOK_MERGED
+      )
+      .reduce((sum, line) => sum + line.wordCount, 0);
+    
+    return { totalWords, processedWords };
+  }
+
+  private formatDuration(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${secs}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${secs}s`;
+    } else {
+      return `${secs}s`;
+    }
+  }
+
   showSummary(): void {
     const stats = this.getStats();
+    const timeInfo = this.getTimeEstimation();
     console.log(`\n✨ Processing Complete!`);
     console.log(`📚 Processed ${stats.total} text segments across ${new Set(this.lines.map((l) => l.chapterNumber)).size} chapters`);
     console.log(`🎵 Generated ${stats.complete} audio segments for final audiobook`);
+    console.log(`⏱️  Total time: ${timeInfo.elapsed}`);
   }
 }

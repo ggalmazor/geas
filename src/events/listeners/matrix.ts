@@ -42,6 +42,9 @@ export class MatrixProgressListener {
               this.matrix.updateLineState(chapter.number, i, LineState.PARSED);
             }
           }
+          
+          // Start TTS timing for estimation
+          this.matrix.startTtsTimer();
         }
         break;
 
