@@ -4,9 +4,10 @@ import { generateSilenceFile, getAudioDuration } from './ffmpeg.ts';
 import { join } from '@std/path';
 import { mergeAudioFiles } from '../utils/ffmpeg.ts';
 import { buildTTS } from './tts.ts';
+import { LineState, ProgressMatrix } from '../utils/progress.ts';
 import PQueue from 'npm:p-queue';
 
-export async function read(book: Book, tempDir: string, options: SpeechOptions): Promise<BookNarration> {
+export async function read(book: Book, tempDir: string, options: SpeechOptions, progress?: ProgressMatrix): Promise<BookNarration> {
   const tts = buildTTS(options);
   const queue = new PQueue({ concurrency: options.concurrency });
 
@@ -16,31 +17,31 @@ export async function read(book: Book, tempDir: string, options: SpeechOptions):
   const shortSilence = await generateSilenceFile(0.8, tempDir);
 
   const chuchu: Promise<ChapterNarration>[] = book.chapters.map(async (chapter: Chapter): Promise<ChapterNarration> => {
-    console.log(`  📝 Processing chapter ${chapter.number}: "${chapter.title}"`);
-    
     const audioFiles: string[] = await Promise.all(chapter.lines.map(async (paragraph: string, index: number): Promise<string> => {
       const outputFile = join(tempDir, `chapter_${chapter.number}_paragraph_${index + 1}.wav`);
 
       await queue.add(async () => {
         await tts.read(cleanText(paragraph), outputFile, options);
-        process.stdout.write('.');
+        if (progress) {
+          progress.updateLineState(chapter.number, index, LineState.TTS_GENERATED);
+        }
       });
 
       return outputFile;
     }));
-    
-    console.log(` ✓ Generated ${audioFiles.length} audio segments`);
 
     const audioFilesWithSilences = audioFiles.flatMap((audioFile, index, array) => {
       return [audioFile, index === 0 || index === array.length - 1 ? longSilence : shortSilence];
     });
 
     const audioFile = join(tempDir, `chapter_${chapter.number}.wav`);
-    console.log(`  🔗 Merging chapter ${chapter.number} audio files...`);
     await mergeAudioFiles(audioFilesWithSilences, audioFile);
 
     const duration = await getAudioDuration(audioFile);
-    console.log(`  ✓ Chapter ${chapter.number} complete (${duration.toFixed(1)}s)`);
+
+    if (progress) {
+      progress.updateChapterState(chapter.number, LineState.CHAPTER_MERGED);
+    }
 
     return { ...chapter, duration, audioFile };
   });

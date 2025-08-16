@@ -7,13 +7,14 @@ import * as ebook from './ebook/mod.ts';
 import * as speech from './speech/mod.ts';
 import * as audiobook from './audiobook/mod.ts';
 import { Logger } from './logger/mod.ts';
-import { PiperSpeechOptions } from './speech/types.ts';
+import { ProgressMatrix } from './utils/progress.ts';
 
 interface Args {
   input?: string;
   output?: string;
   voice?: string;
   concurrency?: number;
+  matrix?: boolean;
   help?: boolean;
   _: string[];
 }
@@ -28,11 +29,12 @@ OPTIONS:
     -o, --output <path>           Output audiobook file (default: input basename + .m4a)
     -v, --voice <name>            Piper voice model name (default: en_US-ljspeech-high)
     -c, --concurrency <num>       Number of concurrent TTS tasks (default: 6)
+    -m, --matrix                  Show visual progress matrix (default: false)
     -h, --help                    Show this help
 
 EXAMPLES:
     geas book.epub --sample
-    geas book.epub -o audiobook.m4a -v en_US-ljspeech-high -c 4
+    geas book.epub -o audiobook.m4a -v en_US-ljspeech-high -c 4 --matrix
 `;
 
 function showHelp(): void {
@@ -54,13 +56,15 @@ async function main(): Promise<void> {
       o: 'output',
       v: 'voice',
       c: 'concurrency',
+      m: 'matrix',
       h: 'help',
     },
-    boolean: ['help'],
+    boolean: ['help', 'matrix'],
     string: ['output', 'voice'],
     default: {
       voice: 'en_US-ljspeech-high',
       concurrency: 6,
+      matrix: false,
     },
   }) as Args;
 
@@ -77,6 +81,7 @@ async function main(): Promise<void> {
 
   const voice = args.voice!;
   const concurrency = args.concurrency!;
+  const useMatrix = args.matrix!;
 
   try {
     logger.info('Starting geas conversion', {
@@ -84,12 +89,16 @@ async function main(): Promise<void> {
       outputFile,
       voice,
       concurrency,
+      matrix: useMatrix,
     });
 
     console.log(`Converting "${inputFile}" to audiobook...`);
     console.log(`Output: ${outputFile}`);
     console.log(`Voice: ${voice}`);
     console.log(`Concurrency: ${concurrency}`);
+    if (useMatrix) {
+      console.log(`Progress Matrix: enabled`);
+    }
     console.log();
 
     // Create temporary directory for processing
@@ -104,24 +113,33 @@ async function main(): Promise<void> {
       console.log(`Chapters: ${book.chapters.length}`);
       console.log();
 
-      await Promise.all(book.chapters.map(async (chapter) => {
+      // Initialize progress matrix if enabled
+      const progress = useMatrix ? new ProgressMatrix(book.chapters) : undefined;
+
+      // Parse with progress tracking
+      await ebook.parse(inputFile, progress);
+
+      await Promise.all(book.chapters.map((chapter) => {
         return Deno.writeTextFile(join(tempDir, `chapter_${chapter.number}.txt`), chapter.lines.join('\n'));
       }));
 
-      console.log('🎙️ Generating speech...');
+      if (!useMatrix) {
+        console.log('🎙️ Generating speech...');
+      }
+
       const speechOptions = {
         concurrency,
         voice,
         sentenceSilence: 0.8,
       };
 
-      const bookNarration = await speech.read(book, tempDir, speechOptions);
-      console.log();
+      const bookNarration = await speech.read(book, tempDir, speechOptions, progress);
 
-      // Step 3: Assemble audiobook
-      console.log('📀 Assembling audiobook...');
-      await audiobook.assemble(bookNarration, tempDir, outputFile);
-      console.log();
+      if (!useMatrix) {
+        console.log('📀 Assembling audiobook...');
+      }
+
+      await audiobook.assemble(bookNarration, tempDir, outputFile, progress);
 
       logger.info('Conversion completed successfully', { outputFile });
       console.log(`✓ Audiobook created: ${outputFile}`);
