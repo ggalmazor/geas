@@ -1,11 +1,12 @@
 import { executeCommand } from '../utils/command.ts';
-import { BookNarration, ChapterNarration } from '../speech/types.ts';
+import { BookNarration } from '../speech/types.ts';
 import { dirname } from '@std/path/dirname';
 import { join } from '@std/path/join';
 
 interface ChapterMarker {
   title: string;
   startTime: number;
+  endTime: number;
 }
 
 export async function addMetadataAndChapters(
@@ -46,41 +47,36 @@ export async function addMetadataAndChapters(
 }
 
 export async function createChapterFile(markers: ChapterMarker[], outputPath: string): Promise<void> {
-  const ffmetadataContent = [';FFMETADATA1', ''];
+  const ffmetadataHeader = [';FFMETADATA1'];
+  const ffmetadataChapters = markers.map(renderFFMetadataChapter);
 
-  for (let i = 0; i < markers.length; i++) {
-    const marker = markers[i];
-    if (!marker) continue;
-
-    const nextMarker = markers[i + 1];
-
-    const startMs = Math.floor(marker.startTime * 1000);
-    const endMs = nextMarker ? Math.floor(nextMarker.startTime * 1000) : 999999999;
-
-    ffmetadataContent.push(
-      '[CHAPTER]',
-      'TIMEBASE=1/1000',
-      `START=${startMs}`,
-      `END=${endMs}`,
-      `title=${marker.title}`,
-      '',
-    );
-  }
-
-  await Deno.writeTextFile(outputPath, ffmetadataContent.join('\n'));
+  await Deno.writeTextFile(outputPath, ffmetadataHeader.concat(ffmetadataChapters).join('\n\n'));
 }
 
 function calculateChapterMarkers(bookNarration: BookNarration): ChapterMarker[] {
-  let currentTime = 0;
+  let startTime = 0;
+  let endTime = 0;
 
-  return bookNarration.chapterNarrations.map((chapterNarration: ChapterNarration) => {
+  return bookNarration.chapterNarrations.map((chapterNarration) => {
+    endTime = startTime + chapterNarration.duration;
     const marker = {
       title: chapterNarration.title,
-      startTime: currentTime,
+      startTime: startTime,
+      endTime: endTime,
     };
 
-    currentTime += chapterNarration.duration;
+    startTime = endTime;
 
     return marker;
   });
+}
+
+function renderFFMetadataChapter(marker: ChapterMarker): string {
+  return [
+    '[CHAPTER]',
+    'TIMEBASE=1/1000',
+    `START=${Math.floor(marker.startTime * 1000)}`,
+    `END=${Math.floor(marker.endTime * 1000)}`,
+    `title=${marker.title}`,
+  ].join('\n');
 }

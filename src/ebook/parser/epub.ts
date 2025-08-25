@@ -4,7 +4,7 @@ import { Book, Chapter, OpfManifest } from '../types.ts';
 import { Document, DOMParser, Element } from 'deno-dom';
 
 export class EpubParser implements Parser {
-  async parse(path: string): Promise<Book> {
+  async parse(path: string, replacements: Record<string, string>): Promise<Book> {
     const file = await Deno.readFile(path);
     const blob = new Blob([file]);
 
@@ -15,7 +15,7 @@ export class EpubParser implements Parser {
     const opfContent = await extractFile(entries, opfPath);
 
     const manifest = parseOpf(opfContent, opfPath);
-    const chapters = await extractChapters(entries, manifest);
+    const chapters = await extractChapters(entries, manifest, replacements);
 
     await zipReader.close();
 
@@ -23,6 +23,7 @@ export class EpubParser implements Parser {
       title: manifest.title,
       author: manifest.author,
       chapters,
+      totalLines: chapters.map((c) => c.totalLines).reduce((a, b) => a + b, 0),
     };
   }
 }
@@ -100,27 +101,29 @@ function getBaseDir(opfPath: string): string {
   return '';
 }
 
-async function extractChapters(entries: Entry[], manifest: OpfManifest): Promise<Chapter[]> {
-  const chapters: { title: string | undefined; lines: string[] }[] = await Promise.all(manifest.spineOrder.map(async (href, index) => {
+async function extractChapters(entries: Entry[], manifest: OpfManifest, replacements: Record<string, string>): Promise<Chapter[]> {
+  const chapters: { title: string | undefined; lines: string[] }[] = await Promise.all(manifest.spineOrder.map(async (href) => {
     const xhtmlContent = await extractFile(entries, manifest.baseDir + href);
     const parser = new DOMParser();
     const doc = parser.parseFromString(xhtmlContent, 'text/html');
-    const lines = parseElement(doc, doc.querySelector('body')!).filter((line) => line !== '');
+    const lines = parseElement(doc, doc.querySelector('body')!, replacements).filter((line) => line !== '');
     if (lines.length === 0) {
-      return { title: undefined, lines: [] };
+      return { title: undefined, lines: [], totalLines: 0 };
     }
 
-    return { title: parseTitle(doc), lines };
+    return { title: parseTitle(doc), lines, totalLines: lines.length };
   }));
 
   return chapters
     .filter((chapter) => chapter.lines.length > 0)
-    .map(({ title, lines }, index) => {
-      title ||= `Chapter ${index + 1}`;
+    .map((chapter, index) => {
+      const title = chapter.title || `Chapter ${index + 1}`;
+      const lines = chapter.lines[0] === title ? chapter.lines : [title!, ...chapter.lines];
       return {
-        title: title,
+        title,
         number: index + 1,
-        lines: lines[0] === title ? lines : [title!, ...lines],
+        lines: lines,
+        totalLines: lines.length,
       };
     });
 }
@@ -138,7 +141,7 @@ function parseTitle(doc: Document): string | undefined {
   return headers[0]!.text;
 }
 
-function parseElement(doc: Document, element: Element): string[] {
+function parseElement(doc: Document, element: Element, replacements: Record<string, string>): string[] {
   if (
     ['p', 'dt', 'dd', 'li'].includes(element.tagName.toLowerCase()) ||
     element.children.length === 0
@@ -151,17 +154,27 @@ function parseElement(doc: Document, element: Element): string[] {
     const innerHTML = element.innerHTML;
     temp.innerHTML = innerHTML.replace(/<br.*?\/?>/gi, '\n'); // Replace <br> with newline
     const text = temp.textContent!
-      .replace(/:(\w)/gu, ': $1') // Add space after colon
-      .replace(/…/gu, '...') // Replace unicode ellipsis with three dots
+      .replace(/:(\w)/gu, ': $1')
+      .replace(/…/gu, '...')
+      .replace(/•/gu, ' ')
       .replace(/[()]/gu, ', ')
-      .replace(/\s[−—]\s/gu, ', ')
-      .replace(/\s+/gu, ' ') // Replace multiple spaces with a single space
-      .replace(/ \./gu, '.') // Remove space before period
-      .replace(/ ,/gu, ',') // Remove space before comma
+      .replace(/[——]/gu, '-')
+      .replace(/\s[−]\s/gu, ', ')
+      .replace(/\s+/gu, ' ')
+      .replace(/ \./gu, '.')
+      .replace(/ ,/gu, ',')
       .trim();
 
-    return [text];
+    if (Object.keys(replacements).length === 0) {
+      return [text];
+    }
+
+    return [
+      Object.entries(replacements).reduce((finalText, [key, value]) => {
+        return finalText.replace(new RegExp(`(?:^|\\s)${key}(?:$|\\s)`, 'g'), (match) => match.replace(key, value));
+      }, text),
+    ];
   }
 
-  return [...element.children].flatMap((child: Element) => parseElement(doc, child));
+  return [...element.children].flatMap((child: Element) => parseElement(doc, child, replacements));
 }

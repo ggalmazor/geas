@@ -35,9 +35,6 @@
     "@std/cli": "jsr:@std/cli@^1.0.0",
     "@std/fs": "jsr:@std/fs@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.0",
-    "blessed": "npm:blessed@^0.1.81",
-    "blessed-contrib": "npm:blessed-contrib@^4.11.0",
-    "cli-progress": "npm:cli-progress@^3.12.0",
     "deno-dom": "jsr:@b-fuze/deno-dom",
     "p-queue": "npm:p-queue@^8.1.0"
   },

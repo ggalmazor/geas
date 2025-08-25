@@ -2,7 +2,7 @@ import { Book } from './types.ts';
 import { EpubParser } from './parser/epub.ts';
 
 export interface Parser {
-  parse(path: string): Promise<Book>;
+  parse(path: string, replacements: Record<string, string>): Promise<Book>;
 }
 
 export function buildParser(path: string): Parser {

@@ -1,3 +1,5 @@
+import { formatDuration } from './time.ts';
+
 export enum LineState {
   PENDING = '⬜', // Not processed
   PARSED = '🟦', // Text parsed
@@ -168,7 +170,7 @@ export class ProgressMatrix {
 
   private getTimeEstimation(): { elapsed: string; estimate?: string } {
     const now = Date.now();
-    const elapsed = this.formatDuration((now - this.startTime) / 1000);
+    const elapsed = formatDuration((now - this.startTime) / 1000);
 
     // Only estimate if we have TTS progress and enough data points
     const stats = this.getStats();
@@ -185,9 +187,9 @@ export class ProgressMatrix {
       const estimatedTtsTime = remainingWords / ttsRate;
       // Add some buffer for assembly (roughly 10% of TTS time)
       const totalEstimated = estimatedTtsTime * 1.1;
-      return { 
-        elapsed, 
-        estimate: this.formatDuration(totalEstimated)
+      return {
+        elapsed,
+        estimate: formatDuration(totalEstimated),
       };
     }
 
@@ -195,34 +197,20 @@ export class ProgressMatrix {
   }
 
   private countWords(text: string): number {
-    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+    return text.trim().split(/\s+/).filter((word) => word.length > 0).length;
   }
 
   private getWordStats(): { totalWords: number; processedWords: number } {
     const totalWords = this.lines.reduce((sum, line) => sum + line.wordCount, 0);
     const processedWords = this.lines
-      .filter(line => 
+      .filter((line) =>
         line.state === LineState.TTS_GENERATED ||
         line.state === LineState.CHAPTER_MERGED ||
         line.state === LineState.AUDIOBOOK_MERGED
       )
       .reduce((sum, line) => sum + line.wordCount, 0);
-    
+
     return { totalWords, processedWords };
-  }
-
-  private formatDuration(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${secs}s`;
-    } else {
-      return `${secs}s`;
-    }
   }
 
   showSummary(): void {

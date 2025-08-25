@@ -1,16 +1,14 @@
+import { Book } from '../ebook/types.ts';
+import { SpeechOptions } from '../speech/types.ts';
+
 export interface BookParseStartEvent {
   type: 'book:parse:start';
-  filePath: string;
+  inputFile: string;
 }
 
 export interface BookParseCompleteEvent {
   type: 'book:parse:complete';
-  book: {
-    title: string;
-    author: string;
-    chapters: number;
-    totalLines: number;
-  };
+  book: Book;
 }
 
 export interface LineParseEvent {
@@ -22,8 +20,8 @@ export interface LineParseEvent {
 
 export interface SpeechStartEvent {
   type: 'speech:start';
-  totalLines: number;
-  concurrency: number;
+  book: Book;
+  speechOptions: SpeechOptions;
 }
 
 export interface LineTTSStartEvent {

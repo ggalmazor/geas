@@ -1,42 +1,23 @@
 import { Book } from './types.ts';
 import { buildParser } from './parser.ts';
-import { progressEmitter } from '../events/mod.ts';
+import { events } from '../events/mod.ts';
+import { join } from '@std/path';
 
-export async function parse(path: string): Promise<Book> {
-  progressEmitter.emit({
-    type: 'book:parse:start',
-    filePath: path,
-  });
+export async function parse(inputFile: string, tempDir: string, replacements: Record<string, string>): Promise<Book> {
+  const parser = buildParser(inputFile);
 
-  const book = await buildParser(path).parse(path);
+  events.emit({ type: 'book:parse:start', inputFile });
 
-  // Calculate total lines
-  const totalLines = book.chapters.reduce((sum, chapter) => sum + chapter.lines.length, 0);
+  const book = await parser.parse(inputFile, replacements);
 
-  progressEmitter.emit({
-    type: 'book:parse:complete',
-    book: {
-      title: book.title,
-      author: book.author,
-      chapters: book.chapters.length,
-      totalLines,
-    },
-  });
-
-  // Emit line parse events
   for (const chapter of book.chapters) {
-    for (let i = 0; i < chapter.lines.length; i++) {
-      const line = chapter.lines[i];
-      if (line) {
-        progressEmitter.emit({
-          type: 'line:parse',
-          chapterNumber: chapter.number,
-          lineIndex: i,
-          text: line,
-        });
-      }
-    }
+    await Deno.writeTextFile(join(tempDir, `chapter_${chapter.number}.txt`), chapter.lines.join('\n'));
+    chapter.lines.forEach((text, lineIndex) => {
+      events.emit({ type: 'line:parse', chapterNumber: chapter.number, lineIndex, text });
+    });
   }
+
+  events.emit({ type: 'book:parse:complete', book });
 
   return book;
 }

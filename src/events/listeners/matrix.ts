@@ -10,7 +10,7 @@ export class MatrixProgressListener {
 
   listen(event: ProgressEvent): void {
     switch (event.type) {
-      case 'book:parse:complete':
+      case 'book:parse:start':
         // Prepare to collect line events
         this.bookStructure = [];
         this.allLinesCollected = false;
@@ -42,7 +42,7 @@ export class MatrixProgressListener {
               this.matrix.updateLineState(chapter.number, i, LineState.PARSED);
             }
           }
-          
+
           // Start TTS timing for estimation
           this.matrix.startTtsTimer();
         }

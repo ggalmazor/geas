@@ -1,6 +1,6 @@
 import type { EventListener, ProgressEvent } from './types.ts';
 
-export class EventEmitter {
+export class Events {
   private listeners: EventListener[] = [];
 
   subscribe(listener: EventListener): () => void {
@@ -27,4 +27,4 @@ export class EventEmitter {
 }
 
 // Global event emitter instance
-export const progressEmitter = new EventEmitter();
+export const events = new Events();

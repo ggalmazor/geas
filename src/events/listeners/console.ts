@@ -1,4 +1,5 @@
 import type { ProgressEvent } from '../types.ts';
+import { formatDuration } from '../../utils/time.ts';
 
 export class ConsoleProgressListener {
   private currentChapter = 0;
@@ -16,7 +17,7 @@ export class ConsoleProgressListener {
     switch (event.type) {
       case 'book:parse:start':
         if (!this.matrixMode) {
-          console.log(`📖 Parsing ebook: ${event.filePath}`);
+          console.log(`📖 Parsing ebook: ${event.inputFile}`);
         }
         break;
 
@@ -28,13 +29,13 @@ export class ConsoleProgressListener {
           console.log(`Total lines: ${event.book.totalLines}`);
           console.log();
         }
-        this.totalChapters = event.book.chapters;
+        this.totalChapters = event.book.chapters.length;
         this.totalLines = event.book.totalLines;
         break;
 
       case 'speech:start':
         if (!this.matrixMode) {
-          console.log(`🎙️ Generating speech with TTS (concurrency: ${event.concurrency})...`);
+          console.log(`🎙️ Generating speech with TTS...`);
         }
         break;
 
@@ -73,7 +74,7 @@ export class ConsoleProgressListener {
       case 'audiobook:assembly:complete':
         if (!this.matrixMode) {
           console.log(`  ✓ Final audiobook assembled`);
-          console.log(`  📄 Total duration: ${this.formatDuration(event.totalDuration)}`);
+          console.log(`  📄 Total duration: ${formatDuration(event.totalDuration)}`);
         }
         break;
 
@@ -82,22 +83,8 @@ export class ConsoleProgressListener {
         console.log(`📊 Final stats:`);
         console.log(`  📚 ${event.stats.totalChapters} chapters processed`);
         console.log(`  📝 ${event.stats.totalLines} text segments converted`);
-        console.log(`  🎵 ${this.formatDuration(event.stats.totalDuration)} total duration`);
+        console.log(`  🎵 ${formatDuration(event.stats.totalDuration)} total duration`);
         break;
-    }
-  }
-
-  private formatDuration(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${secs}s`;
-    } else {
-      return `${secs}s`;
     }
   }
 }

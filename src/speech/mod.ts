@@ -4,75 +4,62 @@ import { generateSilenceFile, getAudioDuration } from './ffmpeg.ts';
 import { join } from '@std/path';
 import { mergeAudioFiles } from '../utils/ffmpeg.ts';
 import { buildTTS } from './tts.ts';
-import { progressEmitter } from '../events/mod.ts';
-import PQueue from 'npm:p-queue';
+import { events } from '../events/mod.ts';
+import { exists } from '@std/fs';
+import PQueue from 'npm:p-queue@8.1.0';
 
-export async function read(book: Book, tempDir: string, options: SpeechOptions): Promise<BookNarration> {
-  const tts = buildTTS(options);
-  const queue = new PQueue({ concurrency: options.concurrency });
+export async function readLine(line: string, lineIndex: number, chapterNumber: number, outputFile: string, options: SpeechOptions): Promise<void> {
+  events.emit({ type: 'line:tts:start', chapterNumber: chapterNumber, lineIndex: lineIndex });
 
-  // Calculate total lines for progress tracking
-  const totalLines = book.chapters.reduce((sum, chapter) => sum + chapter.lines.length, 0);
+  if (!(await exists(outputFile)) || (await Deno.stat(outputFile)).size === 0) {
+    await buildTTS(options).read(cleanText(line), outputFile, options);
+  }
 
-  progressEmitter.emit({
-    type: 'speech:start',
-    totalLines,
-    concurrency: options.concurrency,
-  });
+  events.emit({ type: 'line:tts:complete', chapterNumber: chapterNumber, lineIndex: lineIndex, audioFile: outputFile });
+}
 
-  const longSilence = await generateSilenceFile(1.5, tempDir);
-  const shortSilence = await generateSilenceFile(0.8, tempDir);
+async function readChapter(chapter: Chapter, tempDir: string, longSilenceFile: string, shortSilenceFile: string, options: SpeechOptions): Promise<ChapterNarration> {
+  const chapterAudioFile = join(tempDir, `chapter_${chapter.number}.wav`);
 
-  const chuchu: Promise<ChapterNarration>[] = book.chapters.map(async (chapter: Chapter): Promise<ChapterNarration> => {
-    const audioFiles: string[] = await Promise.all(chapter.lines.map(async (paragraph: string, index: number): Promise<string> => {
-      const outputFile = join(tempDir, `chapter_${chapter.number}_paragraph_${index + 1}.wav`);
+  if (await exists(chapterAudioFile)) {
+    const duration = await getAudioDuration(chapterAudioFile);
 
-      await queue.add(async () => {
-        progressEmitter.emit({
-          type: 'line:tts:start',
-          chapterNumber: chapter.number,
-          lineIndex: index,
-        });
+    events.emit({ type: 'chapter:merge:complete', chapterNumber: chapter.number, duration, audioFile: chapterAudioFile });
 
-        await tts.read(cleanText(paragraph), outputFile, options);
+    return { ...chapter, duration, audioFile: chapterAudioFile };
+  }
 
-        progressEmitter.emit({
-          type: 'line:tts:complete',
-          chapterNumber: chapter.number,
-          lineIndex: index,
-          audioFile: outputFile,
-        });
-      });
+  const queue = new PQueue({ concurrency: options.concurrency! });
+  const chapterAudioFiles: string[] = (await Promise.all(chapter.lines.map(async (paragraph, index, array) => {
+    const lineAudioFile = join(tempDir, `chapter_${chapter.number}_line_${index + 1}.wav`);
 
-      return outputFile;
-    }));
+    await queue.add(() => readLine(paragraph, index, chapter.number, lineAudioFile, options));
 
-    const audioFilesWithSilences = audioFiles.flatMap((audioFile, index, array) => {
-      return [audioFile, index === 0 || index === array.length - 1 ? longSilence : shortSilence];
-    });
+    const silenceFile = index === 0 || index === array.length - 1 ? longSilenceFile : shortSilenceFile;
 
-    const audioFile = join(tempDir, `chapter_${chapter.number}.wav`);
+    return [lineAudioFile, silenceFile];
+  }))).flat();
 
-    progressEmitter.emit({
-      type: 'chapter:merge:start',
-      chapterNumber: chapter.number,
-      totalFiles: audioFilesWithSilences.length,
-    });
+  await mergeAudioFiles(chapterAudioFiles, chapterAudioFile);
 
-    await mergeAudioFiles(audioFilesWithSilences, audioFile);
-    const duration = await getAudioDuration(audioFile);
+  const duration = await getAudioDuration(chapterAudioFile);
 
-    progressEmitter.emit({
-      type: 'chapter:merge:complete',
-      chapterNumber: chapter.number,
-      duration,
-      audioFile,
-    });
+  events.emit({ type: 'chapter:merge:complete', chapterNumber: chapter.number, duration, audioFile: chapterAudioFile });
 
-    return { ...chapter, duration, audioFile };
-  });
+  return { ...chapter, duration, audioFile: chapterAudioFile };
+}
 
-  const chapterNarrations = await Promise.all<ChapterNarration>(chuchu);
+export async function readBook(book: Book, tempDir: string, speechOptions: SpeechOptions): Promise<BookNarration> {
+  events.emit({ type: 'speech:start', book, speechOptions });
+
+  const longSilenceFile = await generateSilenceFile(1.5, tempDir);
+  const shortSilenceFile = await generateSilenceFile(0.8, tempDir);
+
+  const chapterNarrations: ChapterNarration[] = [];
+  for (let chapter of book.chapters) {
+    const chapterNarration = await readChapter(chapter, tempDir, longSilenceFile, shortSilenceFile, speechOptions);
+    chapterNarrations.push(chapterNarration);
+  }
 
   return { ...book, chapterNarrations };
 }

@@ -2,20 +2,14 @@ export interface Book {
   title: string;
   author: string;
   chapters: Chapter[];
+  totalLines: number;
 }
 
 export interface Chapter {
   title: string;
   number: number;
   lines: string[];
-}
-
-export interface ChapterChunk {
-  number: number;
-  text: string;
-  chapterNumber: number;
-  startOffset: number;
-  endOffset: number;
+  totalLines: number;
 }
 
 export interface OpfManifest {

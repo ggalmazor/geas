@@ -3,10 +3,10 @@ import { BookNarration } from '../speech/types.ts';
 import { addMetadataAndChapters } from './ffmpeg.ts';
 import { mergeAudioFiles } from '../utils/ffmpeg.ts';
 import { basename } from '@std/path';
-import { progressEmitter } from '../events/mod.ts';
+import { events } from '../events/mod.ts';
 
 export async function assemble(bookNarration: BookNarration, tempDir: string, outputPath: string): Promise<void> {
-  progressEmitter.emit({
+  events.emit({
     type: 'audiobook:assembly:start',
     totalChapters: bookNarration.chapterNarrations.length,
   });
@@ -19,7 +19,7 @@ export async function assemble(bookNarration: BookNarration, tempDir: string, ou
   // Calculate total duration
   const totalDuration = bookNarration.chapterNarrations.reduce((sum, chapter) => sum + chapter.duration, 0);
 
-  progressEmitter.emit({
+  events.emit({
     type: 'audiobook:assembly:complete',
     outputPath,
     totalDuration,
